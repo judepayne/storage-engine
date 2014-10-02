@@ -1,0 +1,17 @@
+{:db-type :lvlDB
+ :db-dir "store"
+ :minor-db-pattern "#\"snap-\""
+ :current-db "current"
+ :current-db-options { :key-encoder name
+                       :key-decoder (comp keyword bs/to-string)
+                       :val-decoder (comp edn/read-string bs/to-char-sequence) ;;needs not be set!
+                       :val-encoder pr-str
+                       :cache-size  (* 32 1024 1024)
+                     }
+  :minor-db-options  { :key-encoder name
+                       :key-decoder (comp keyword bs/to-string)
+                       :val-decoder (comp edn/read-string bs/to-char-sequence) ;;needs not be set!
+                       :val-encoder pr-str
+                       :cache-size  (* 32 1024 1024)
+                      }
+ }

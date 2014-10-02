@@ -1,0 +1,42 @@
+(comment
+  "Rationale behind this module, especially snapshots
+  1.  multiple snaps can be captured in one store or one store per snap.
+  2.  If one store, some form of composite key would have to be used. Not especially
+      a disadvantage since in either form the caller knows the name/ 'tag' of the snap.
+  3.  With snaps kept in one store, harder to enumerate all available snaps; would either
+      have to iterate all keys or keep (persist) the enumeration between programme runs.
+  4.  similarly harder to 'prune' snaps.
+  5.  therefore multiple stores preferred.
+  6.  where the store is a file or folder, it's name can be used to directly represent the tag;
+      a natural fit for the multiple stores model.
+  7.  when other, e.g. a separate process - memcached, redis, sql db etc, must keep (persist)
+      a mapping to the processes must be kept. multiple processes must be kept up and running.
+      This is a considerable overhead. If the store offers a keyspace/ namespace e.g. redis set
+      or sql table, using that would be much preferable to running multiple instances. therefore
+      a process like memcahed which doesn't offer this, is probably not suitable.
+  8.  We might think that then that file based + memory cache stores (e.g. level db) and memory
+      based + file backed stores are equally good for this task, but memory based stores need to
+      keep their whole working set in memory and this limits their scalability.
+  -------> Assume we will only use namespaced stores (file/ mem) so no need to keep a mapping.
+  -------> Note that namespaces must be enumerable.
+  9.  write operations are performed by a single thread (by design/ choice). All 'normal' writes
+      are to the current db. Snaps write to a new (tagged) db. When the storage engine receives
+      a request to create a new snap, it must stop processing updates. It could do this by
+      buffering write 'tasks' including snaps (on a queue) or, potentially better, sending a
+      (synchronous) message to the component receiving updates and forwarding to the storage engine
+      to stop sending/ and buffer - potentially better if the incoming message transport is itself
+      durable.
+ 10.  In order for the storage engine not to have to (internally) buffer, the updater component
+      needs to send new writes synchronously - there must be be ack so that if the storage engine
+      is snapping (and this request will most likely originate from another component) the ack says 'no'.
+  -------> Have the updater component single threaded and that same thread call through to storage
+           engine's 'normal' write functions.
+ 11.  Another component, call it the scheduler which determines when snaps are to be created and
+      names, can also be single threaded and call through to the storage storage engine.
+  -------> We need a point of synchronisation in the storage engine to be used as a point of
+           coordination between the two components.
+  12. Reads on the other hand can be as multi-threaded as practicable; level db (for example)
+      performance doesn't seem to improve with a read request split over multiple threads but it
+      keeps the application responsive while serving multiple read requests so an appropriately
+      sized thread pool seems like a good fit."
+  )

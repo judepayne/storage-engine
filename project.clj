@@ -8,6 +8,6 @@
                  [factual/clj-leveldb "0.1.1"]
                  [org.clojure/math.numeric-tower "0.0.4"]
                  [org.clojure/tools.trace "0.7.8"]
-                 [perf-bench "0.1.4"]
+                 [perf-bench "0.1.5"]
                  [live-chart "0.1.1"]])
 

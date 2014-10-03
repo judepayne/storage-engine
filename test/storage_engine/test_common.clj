@@ -1,6 +1,5 @@
-(ns storage-engine.test-common.clj
+(ns storage-engine.test-common
   (:require [perf-bench :as b]
-            [storage-engine.core :as l]
             [clojure.string :as string]))
 
 
@@ -49,69 +48,37 @@
   "infinite sequence of strings"
   [] (repeatedly rand-val-2-20))
 
-(defn kv-seq []
-  "infinite sequence of sequential keys, random values"
-  (map (comp flatten vector) keys-seq (vals-ran)))
- 
-(defn kv-ran [limit]
-  "infinite sequence of random keys, random values
+(defn valz
+  "given a size and a function which generates random length strings
+  returns a tuple/vec where the first is the total size of all generated
+  strings and the second is a sequence of the generated strings"
+  [size randFn]
+  (loop [kilob 0
+         coll []
+         rem size]
+    (if (= rem 0) [kilob coll]
+        (let [[n payload] (randFn)]
+          (recur
+           (+ kilob n)
+           (conj coll (str (num->str5 n) payload))
+           (dec rem))))))
+
+(def valz-memo (memoize valz))
+
+(def ^:dynamic *rand-fn* rand-val-2-20)
+
+(defn kv-seq [s]
+  "sequence, size s, of sequential keys, random values"
+  (let [[size valz-] (valz-memo s *rand-fn*)]
+    [size
+     (into [] (map vector (take s keys-seq) valz-))]))
+
+(defn test [s] (first (kv-seq s)))
+
+(defn kv-ran [s limit]
+  "sequence, size s, of random keys, random values
   keys are chosen from the set < limit"
-  (map (comp flatten vector) (keys-ran limit) (vals-ran)))
+  (let [[size valz-] (valz-memo s *rand-fn*)]
+    [size
+     (into [] (map vector (take s (keys-ran limit)) valz-))]))
  
-;;****************************************************************************
-;;batch readers/ writers
-(defn read-batch
-"reads a batch of keyz from db, returns total kilobytes read"
-  [this-db keyz]
-  (reduce (fn [acc n]
-            (+ acc
-               (let [v (l/get this-db n)]
-                 (str->num (take 5 v)))))
-          0 keyz))
- 
-(defn write-batch
-  "writes a batch of keyvalz to db, returns total kilobytes written"
-  [this-db keyvals]
-  (reduce (fn [acc n]
-            (+ acc
-               ((l/put this-db (first n) (str (num->str5 (second n)) (third n)))
-                (second n))))
-          0 keyvals))
-
-(defn write-batch-boo
-  "writes a batch of keyvalz to db, returns total kilobytes written"
-  [keyvals]
-  (reduce (fn [acc n]
-            (+ acc
-               (second n)))
-          0 keyvals))
- 
-;test
-;; type is a lazy-seq
-;;(type (write-batch db (kv-seq my-string)))
- 
-;; writes 1002 k,vs - lighttable chunking??
-;(write-batch db (kv-seq my-string))
- 
-;;type is a lazy-seq
-;;(type (take 5 (read-batch db keys-seq)))
- 
-;;(take 5 (read-batch db keys-seq))
- 
-;;****************************************************************************
-;;lazy-batches
-(defn bench-read-seq [this-db batch-size]
-  (map #(b/bench (read-batch this-db %) 1)
-       (partition batch-size keys-seq)))
-
-(defn bench-read-ran [this-db batch-size limit]
-  (map #(b/bench (read-batch this-db %) 1)
-       (partition batch-size (keys-ran limit))))
-
-(defn bench-write-seq [this-db batch-size payload]
-  (map #(b/bench (write-batch this-db %) 1)
-       (partition batch-size (kv-seq payload))))
-
-(defn bench-write-ran [this-db batch-size payload limit]
-  (map #(b/bench (write-batch this-db %) 1)
-       (partition batch-size (kv-ran payload limit))))

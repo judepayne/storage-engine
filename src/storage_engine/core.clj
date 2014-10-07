@@ -8,16 +8,33 @@
             [clojure.core.async :as async]))
 
 
-;;configuartion
-(def ^{:private true} start-config (atom {}))
-(defn- config [] (let [c @start-config]
-                   (if (not (empty? c))
-                     c
-                     (edn/read-string (slurp "storage-engine.core.config.edn")))))
+;;configuartion handling
+(def config-file "config/mutable-config.edn")
 
-;;atom to hold database/s/ namespaces (see design)
+;;atom to hold live configuation
+(def ^{:private true} config (atom {}))
+
+(defn- get-file-config []
+  (try (edn/read-string (slurp config-file))
+       (catch Exception e nil)))
+
+(defn- set-config!
+  "load default config from file"
+  ([conf]
+     (let [file-conf (get-file-config)
+           final-conf (if (nil? file-conf) conf
+                          (merge file-conf conf))]
+       (reset! config final-conf)))
+  ([]
+     (let [file-conf (get-file-config)]
+       (if-not ( nil? file-conf)
+         (reset! config (get-file-config))))))
+
+
+;;atom to hold database/s/ namespaces/ status (see design)
 (def ^{:private true} snaps (agent {}))
 (def ^{:private true} curr-db (agent nil))
+(def ^{:private true} alive? (atom false))
 
 ;;file utility functions
 (defn- list-subdirs
@@ -33,13 +50,12 @@
 
 ;;START LvlDB specific stuff
 ;; from config
-(def ^{:private true} store-dir ((config) :db-dir))
-(def ^{:private true} snap-db-pattern (read-string ((config) :minor-db-pattern)))
-(def ^{:private true} current-db ((config) :current-db))
-(def ^{:private true} current-db-options (eval ((config) :current-db-options)))
-(def ^{:private true} snap-db-options (eval ((config) :minor-db-options)))
-(defn to-snap-name [n] (str snap-db-pattern n))
-(def ^{:private true} alive? (atom false))
+(defn ^{:private true} store-dir [] (@config :db-dir))
+(defn ^{:private true} snap-db-pattern [] (@config :minor-db-pattern))
+(defn ^{:private true} current-db [] (@config :current-db))
+(defn ^{:private true} current-db-options [] (eval (@config :current-db-options)))
+(defn ^{:private true} snap-db-options [] (eval (@config :minor-db-options)))
+(defn to-snap-name [n] (str (read-string (snap-db-pattern)) n))
 
 ;; Wrap lvldb specific openning functions generically
 ;; This section would need rewriting for a db different to leveldb
@@ -158,6 +174,7 @@
 ;*******************startup/ shutdown functions***********************
 (defn startup
   ([]
+     (set-config!)
      (try
        (await snaps)
        (open-snaps)
@@ -168,8 +185,8 @@
        (catch Exception e
          (str "caught exception: " (.getCause e)
               (.getMessage e)))))
-  ([config]
-     (reset! start-config config)
+  ([conf]
+     (set-config! conf)
      (startup)))
 
 (defn shutdown []
@@ -182,7 +199,6 @@
     (catch Exception e
       (str "caught exception: " (.getCause e)
            (.getMessage e)))))
-
 
 ;***********************public clojure api****************************
 ;********************private api helper fns***************************

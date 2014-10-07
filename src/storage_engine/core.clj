@@ -43,7 +43,7 @@
   (->> (file-seq (io/file parent-dir))
        (filter #(.isDirectory %))
        (map #(.getName %))
-       (filter #(not (nil? (re-seq pattern %))))))
+       (filter #(not (nil? (re-seq (read-string pattern) %))))))
 
 (defn- dbdir-to-key [pattern dir]
   (keyword (second (clojure.string/split dir pattern))))

@@ -71,7 +71,7 @@
             db))))
 
 (defn- close-db-
-  "closes single( lvlDB. performs check to see if already closed"
+  "closes single lvlDB. performs check to see if already closed"
   [db]
   (if (open? db)
     (kv/close db)
@@ -83,17 +83,17 @@
 ;;************General open/close current & snap functions*************
 
 (defn- snap-map []
-  (let [conns (list-subdirs store-dir snap-db-pattern)]
+  (let [conns (list-subdirs (store-dir) (snap-db-pattern))]
     (zipmap
-     (map #(dbdir-to-key snap-db-pattern %) conns)
+     (map #(dbdir-to-key (snap-db-pattern) %) conns)
      (map
-      #(vector (str store-dir "/" %) snap-db-options)
+      #(vector (str (store-dir) "/" %) (snap-db-options))
       conns))))
 
 (defn- create-snap-db- [conn]
   (let [snap-pat (to-snap-name conn)]
     (if-not ((keyword snap-pat) @snaps)
-      (kv/open-lvldb (str store-dir "/" snap-pat) snap-db-options)
+      (kv/open-lvldb (str (store-dir) "/" snap-pat) (snap-db-options))
       (throw (RuntimeException. "snap already exists")))))
 
 
@@ -105,7 +105,7 @@
     curr-db
     (fn [curr]
       (if (nil? (:open? curr))
-        (open-db- (str store-dir "/" current-db) current-db-options)
+        (open-db- (str (store-dir) "/" (current-db)) (current-db-options))
         (open-db- curr)))))
 
 (defn- close-current-db

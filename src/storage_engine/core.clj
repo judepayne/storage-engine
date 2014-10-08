@@ -30,7 +30,6 @@
        (if-not ( nil? file-conf)
          (reset! config (get-file-config))))))
 
-
 ;;atom to hold database/s/ namespaces/ status (see design)
 (def ^{:private true} snaps (agent {}))
 (def ^{:private true} curr-db (agent nil))
@@ -43,19 +42,32 @@
   (->> (file-seq (io/file parent-dir))
        (filter #(.isDirectory %))
        (map #(.getName %))
-       (filter #(not (nil? (re-seq (read-string pattern) %))))))
+       (filter #(not (nil? (re-seq  pattern %))))))
 
 (defn- dbdir-to-key [pattern dir]
   (keyword (second (clojure.string/split dir pattern))))
 
 ;;START LvlDB specific stuff
 ;; from config
+;; (note: this is lvlDB specific, but no attempt is (yet) made to do
+;; anything with the :db-type piece of config - we always open a lvlDB
 (defn ^{:private true} store-dir [] (@config :db-dir))
-(defn ^{:private true} snap-db-pattern [] (@config :minor-db-pattern))
+(defn ^{:private true} snap-db-pattern [] (read-string (@config :minor-db-pattern)))
 (defn ^{:private true} current-db [] (@config :current-db))
 (defn ^{:private true} current-db-options [] (eval (@config :current-db-options)))
 (defn ^{:private true} snap-db-options [] (eval (@config :minor-db-options)))
-(defn to-snap-name [n] (str (read-string (snap-db-pattern)) n))
+
+;;Snaps can be known by three different names used in different contexts:
+;;   - the 'tag', e.g. "test1"
+;;   - the 'snap-name': db/ store name (directory name in disk with
+;;     levelDB, e.g. "snap-test1"
+;;   - the snap-key, e.g. :test1, used to retrieve the db (class
+;;     implementing KVStore protocol) from the 'snaps' atom
+;; To eliminate confusion, we adopt a convention of always passing the
+;; tag between the functions in this file and then converted to the
+;; required form within the function.
+(defn tag->snap-name [tag] (str (snap-db-pattern) tag))
+(defn tag->snap-key [tag] (keyword tag))
 
 ;; Wrap lvldb specific openning functions generically
 ;; This section would need rewriting for a db different to leveldb
@@ -90,11 +102,10 @@
       #(vector (str (store-dir) "/" %) (snap-db-options))
       conns))))
 
-(defn- create-snap-db- [conn]
-  (let [snap-pat (to-snap-name conn)]
-    (if-not ((keyword snap-pat) @snaps)
-      (kv/open-lvldb (str (store-dir) "/" snap-pat) (snap-db-options))
-      (throw (RuntimeException. "snap already exists")))))
+(defn- create-snap-db- [tag]
+  (if-not ((tag->snap-key tag) @snaps)
+    (kv/open-lvldb (str (store-dir) "/" (tag->snap-name tag)) (snap-db-options))
+    (throw (RuntimeException. "snap already exists"))))
 
 
 ;*********************open/ close (agent) functions*******************
@@ -134,25 +145,24 @@
   [tag]
   (send
      snaps
-     (fn [m] (assoc m tag (close-db- (tag m))))))
+     (fn [m] (assoc m (tag->snap-key tag) (close-db- ((tag->snap-key tag) m))))))
 
 (defn- open-snap
   "open snap with supplied name"
   [tag]
   (send
      snaps
-     (fn [m] (assoc m tag (open-db- (tag m))))))
+     (fn [m] (assoc m (tag->snap-key tag) (open-db- ((tag->snap-key tag) m))))))
 
 (defn- create-snap
   "create snap with supplied name
   converts name to keyword and adds snap prefix"
   [tag]
-  (let [db-name tag]
-    (send
-      snaps
-      (fn [m] (assoc m
-              (keyword db-name)
-              (create-snap-db- db-name))))))
+  (send
+   snaps
+   (fn [m] (assoc m
+            (tag->snap-key tag)
+            (create-snap-db- tag)))))
 
 (defn- snap-status []
   (util/map-vals
@@ -171,6 +181,19 @@
 ;; (snap-status)
 ;*********************************************************************
 ;*********************************************************************
+;***************************Clojure api*******************************
+;********************private api helper fns***************************
+
+(defn- ->snap-db
+  [snap-db]
+  (map
+   #(let [[k v] %]
+      (kv/put snap-db k v))
+   (with-open [snap (kv/snapshot @curr-db)]
+    (kv/iterator snap))))
+
+
+;**********************public clojure api fns*************************
 ;*******************startup/ shutdown functions***********************
 (defn startup
   ([]
@@ -200,19 +223,7 @@
       (str "caught exception: " (.getCause e)
            (.getMessage e)))))
 
-;***********************public clojure api****************************
-;********************private api helper fns***************************
-
-(defn- ->snap-db
-  [snap-db]
-  (map
-   #(let [[k v] %]
-      (kv/put snap-db k v))
-   (with-open [snap (kv/snapshot @curr-db)]
-    (kv/iterator snap))))
-
-
-;**********************public clojure api fns*************************
+;*************************other functions*****************************
 (defn get
   "returns value for the specified key"
   [k]
@@ -226,20 +237,22 @@
 (defn get-current
   "maps the supplied fn over lazy-seq representing the current state
    results in a new lazy-seq with elements of form [k v]"
-  [f]
-  (map f
-       (with-open [snap (kv/snapshot @curr-db)]
-         (kv/iterator snap))))
+  ([f]
+     (map f
+          (with-open [snap (kv/snapshot @curr-db)]
+            (kv/iterator snap))))
+  ([] (get-current identity)))
 
 (defn get-current-async
   "delivers the current state into supplied core-async channel"
-  [channel]
-  (async/thread
-   (do
-     (doseq [i (with-open [snap (kv/snapshot @curr-db)]
-                 (kv/iterator snap))]
-       (async/>!! channel i))
-     (async/close! channel))))
+  ([f channel]
+     (async/thread
+      (do
+        (doseq [i (map f (with-open [snap (kv/snapshot @curr-db)]
+                           (kv/iterator snap)))]
+          (async/>!! channel i))
+        (async/close! channel))))
+  ([channel] (get-current-async identity channel)))
 
 (comment
 ;;unit test for get-current-async/ get-snap-async
@@ -258,36 +271,42 @@
 )
 
 (defn snap-to
-  "copy the state of the current db into a new named snap"
-  [snap-name]
+  "copy the (snap-shotted) state of the current db into a new named snap"
+  [tag]
   (do
-    (create-snap snap-name)
+    (create-snap tag)
     (await snaps)
-    (let [db ((keyword snap-name) @snaps)]
+    (let [db ((tag->snap-key tag) @snaps)]
       (->snap-db db))))
 
 (defn get-snap
   "maps the supplied fn over lazy-seq representing the snap
    results in a new lazy-seq with elements of form [k v]"
-  [snap-name f]
-  (do
-    (open-snap (to-snap-name snap-name))
-    (await snaps)
-    (let [db ((keyword snap-name) @snaps)]
-      (map f (kv/iterator db)))))
+  ([tag f]
+     (let [t-key (tag->snap-key tag)]
+       (if-not (t-key @snaps)
+         (throw (RuntimeException. "Snap does not exist!"))
+         (do
+           (open-snap tag)
+           (await snaps)
+           (map f (kv/iterator ((tag->snap-key tag) @snaps)))))))
+  ([tag] (get-snap tag identity)))
 
 (defn get-snap-async
   "delivers the named snap into supplied core.async channel"
-  [snap-name channel]
-  (do
-    (open-snap (to-snap-name snap-name))
-    (await snaps)
-    (let [db ((keyword snap-name) @snaps)]
-        (async/thread
+  ([tag f channel]
+     (let [t-key (tag->snap-key tag)]
+       (if-not (t-key @snaps)
+         (throw (RuntimeException. "Snap does not exist!"))
          (do
-           (doseq [i (kv/iterator db)]
-             (async/>!! channel i))
-           (async/close! channel))))))
+           (open-snap (tag))
+           (await snaps)
+           (async/thread
+            (do
+              (doseq [i (map f (kv/iterator ((tag->snap-key) @snaps)))]
+                (async/>!! channel i))
+              (async/close! channel)))))))
+  ([tag channel] (get-snap-async tag identity channel)))
 
 (defn is-alive? []
   @alive?)

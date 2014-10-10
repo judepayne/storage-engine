@@ -1,5 +1,5 @@
 # storage-engine
-
+#*work in progress*
 A Clojure library designed to provide a mutable and immutable local Key, Value disk based stores/ caches with the ability to put and get as well as create and retrieve snapshots of part of or the entire state.
 To be used for when your data set is too big to fit in memory, but you still want access to it very fast. Sequential reads are used whenever possible to increase read speed.
 The cache is backed by the Google leveldb; primary storage

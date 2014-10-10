@@ -190,7 +190,15 @@
    #(let [[k v] %]
       (kv/put snap-db k v))
    (with-open [snap (kv/snapshot @curr-db)]
-    (kv/iterator snap))))
+     (kv/iterator snap))))
+
+(defn- seq->chan
+  [coll f chan]
+  (async/thread
+   (do
+     (doseq [i (map f coll)]
+       (async/>!! chan i))
+     (async/close! chan))))
 
 
 ;**********************public clojure api fns*************************
@@ -245,29 +253,27 @@
 
 (defn get-current-async
   "delivers the current state into supplied core-async channel"
-  ([f channel]
-     (async/thread
-      (do
-        (doseq [i (map f (with-open [snap (kv/snapshot @curr-db)]
-                           (kv/iterator snap)))]
-          (async/>!! channel i))
-        (async/close! channel))))
+  ([f chan]
+     (seq->chan       
+      (with-open [snap (kv/snapshot @curr-db)]
+        (kv/iterator snap))
+      f chan))
   ([channel] (get-current-async identity channel)))
 
 (comment
 ;;unit test for get-current-async/ get-snap-async
-(startup)
-(def c (async/chan 10))
+  (startup)
+  (def c (async/chan 10))
 
-(async/thread
- (loop []
-   (let [k (async/<!! c)]
-     (if-not k (println "finished")
-       (do
-         (println k)
-         (recur))))))
+  (async/thread
+   (loop []
+     (let [k (async/<!! c)]
+       (if-not k (println "finished")
+               (do
+                 (println k)
+                 (recur))))))
 
-(get-current c)
+  (get-current c)
 )
 
 (defn snap-to
@@ -294,19 +300,17 @@
 
 (defn get-snap-async
   "delivers the named snap into supplied core.async channel"
-  ([tag f channel]
+  ([tag f chan]
      (let [t-key (tag->snap-key tag)]
        (if-not (t-key @snaps)
          (throw (RuntimeException. "Snap does not exist!"))
          (do
            (open-snap (tag))
            (await snaps)
-           (async/thread
-            (do
-              (doseq [i (map f (kv/iterator ((tag->snap-key) @snaps)))]
-                (async/>!! channel i))
-              (async/close! channel)))))))
-  ([tag channel] (get-snap-async tag identity channel)))
+           (seq->chan
+            (kv/iterator ((tag->snap-key) @snaps))
+            f chan)))))
+  ([tag chan] (get-snap-async tag identity chan)))
 
 (defn is-alive? []
   @alive?)
@@ -314,5 +318,16 @@
 (defn list-snaps []
   (map name (keys @snaps)))
 ;; all meta data?
+  (startup)
+  (def c (async/chan 10))
+
+  (async/thread
+   (loop []
+     (let [k (async/<!! c)]
+       (if-not k (println "finished")
+               (do
+                 (println k)
+                 (recur))))))
+
 
 

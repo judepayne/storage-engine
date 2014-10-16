@@ -33,12 +33,6 @@
   [s]
   (Integer/parseInt s))
 
-(defn size
-  "reads the first 5 chars of a size-tagged string
-  returns that size as a long"
-  [s]
-  (str->num (subs s 0 5)))
-
 (def  keys-seq
   "infinite lazy sequence of sequentially ordered key strings starting from 1"
   (map #(str key-stub %) (iterate inc 1)))
@@ -49,7 +43,7 @@
   [limit]
   (repeatedly #(str key-stub (rand-int limit))))
  
-(defn valz
+(defn valz2
   [randFn]
   (lazy-seq
    (repeatedly
@@ -64,11 +58,11 @@
 
 (defn kv-seq []
   "sequence, size s, of sequential keys, random values"
-  (map vector keys-seq (valz *rand-fn*)))
+  (map vector keys-seq (valz2 *rand-fn*)))
 
 (defn kv-ran [limit]
   "random sequence of random keys and values where
   keyss are chosen from the set < limit"
-  (map vector (keys-ran limit) (valz *rand-fn*)))
+  (map vector (keys-ran limit) (valz2 *rand-fn*)))
 
 

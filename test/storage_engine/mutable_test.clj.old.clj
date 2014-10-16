@@ -16,6 +16,12 @@
 
 ;;****************************************************************************
 ;;batch readers/ writers
+ 
+(defn write-batch
+  "writes a batch of keyvalz to db"
+  [keyvals]
+  (map #(l/put (first %) (second %)) keyvals))
+;;---> Change starts here
 
 (defn write-throughput
   "given a size (in kb) of a batch of key vals,
@@ -26,25 +32,15 @@
    size
    (b/bench (map #(l/put (first %) (second %)) keyvals))))
 
-(defn write-batch
-  "writes a batch of keyvalz to db, returns total kilobytes written"
-  [keyvalz]
-  (reduce (fn [cur acc]
-            (+ acc
-               (let [si (tc/size (second cur))]
-                 (l/put (first cur) (second cur))
-                 si)))
-          0 keyvalz))
-
 (defn read-batch
   "reads a batch of keyz from db, returns total kilobytes read"
   [keyz]
-  (reduce (fn [cur acc]
+  (reduce (fn [acc n]
             (+ acc
-               (tc/size (l/get cur))))
+               (let [v (l/get n)]
+                 (tc/str->num (take 5 v)))))
           0 keyz))
-
-
+ 
 ;;****************************************************************************
 
 (def *rand-fn* tc/rand-val-2-20)

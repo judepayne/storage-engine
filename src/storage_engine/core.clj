@@ -318,16 +318,3 @@
 (defn list-snaps []
   (map name (keys @snaps)))
 ;; all meta data?
-  (startup)
-  (def c (async/chan 10))
-
-  (async/thread
-   (loop []
-     (let [k (async/<!! c)]
-       (if-not k (println "finished")
-               (do
-                 (println k)
-                 (recur))))))
-
-
-

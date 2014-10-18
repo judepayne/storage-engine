@@ -8,11 +8,16 @@
             [clojure.core.async :as async]))
 
 
+;;Atoms for holding STATE
+;;holds snap dbs
+(def  snaps (atom {}))
+;;holds current db
+(def  curr-db (atom nil))
+;;holds config
+(def  config (atom {}))
+
 ;;configuartion handling
 (def config-file "config/mutable-config.edn")
-
-;;atom to hold live configuation
-(def ^{:private true} config (atom {}))
 
 (defn- get-file-config []
   (try (edn/read-string (slurp config-file))
@@ -28,12 +33,8 @@
   ([]
      (let [file-conf (get-file-config)]
        (if-not ( nil? file-conf)
-         (reset! config (get-file-config))))))
+         (reset! config file-conf)))))
 
-;;atom to hold database/s/ namespaces/ status (see design)
-(def ^{:private true} snaps (agent {}))
-(def ^{:private true} curr-db (agent nil))
-(def ^{:private true} alive? (atom false))
 
 ;;file utility functions
 (defn- list-subdirs
@@ -108,78 +109,48 @@
     (throw (RuntimeException. "snap already exists"))))
 
 
-;*********************open/ close (agent) functions*******************
+;****************open/ close (State-setting) functions****************
+
 (defn- open-current-db
-  "open the current db if not already open"
+  "opens the current db if not already open"
   []
-  (send
-    curr-db
-    (fn [curr]
-      (if (nil? (:open? curr))
-        (open-db- (str (store-dir) "/" (current-db)) (current-db-options))
-        (open-db- curr)))))
+  (reset! curr-db
+    (if (nil? (:open? @curr-db))
+      (open-db- (str (store-dir) "/" (current-db)) (current-db-options))
+      (open-db- @curr-db))))
 
 (defn- close-current-db
   "close the current db if not already closed"
   []
-  (send
-    curr-db
-    (fn [curr] (close-db- curr))))
+  (reset! curr-db (close-db- @curr-db)))
+
+(defn- open-snap
+  "opens snap with given tag"
+  [tag]
+  (let [k (tag->snap-key tag)
+        v (k @snaps)]
+    (swap! snaps assoc k (open-db- v))))
 
 (defn- open-snaps
   "open all snap dbs in config store dir"
   []
-  (send
-     snaps
-     (fn [m] (util/converge-to open-db- open? m (snap-map)))))
+  (map
+   (fn [[k v]] (swap! snaps assoc k (open-db- v)))
+   (snap-map)))
 
 (defn- close-snaps
-  "close all (open) snaps"
+  "close all snaps"
   []
-  (send
-     snaps
-     (fn [m] (util/map-vals #(close-db- %) m))))
-
-(defn- close-snap
-  "close snap with supplied name"
-  [tag]
-  (send
-     snaps
-     (fn [m] (assoc m (tag->snap-key tag) (close-db- ((tag->snap-key tag) m))))))
-
-(defn- open-snap
-  "open snap with supplied name"
-  [tag]
-  (send
-     snaps
-     (fn [m] (assoc m (tag->snap-key tag) (open-db- ((tag->snap-key tag) m))))))
+  (map
+   (fn [[k v]] (swap! snaps assoc k (close-db- v)))
+   (snap-map)))
 
 (defn- create-snap
   "create snap with supplied name
   converts name to keyword and adds snap prefix"
   [tag]
-  (send
-   snaps
-   (fn [m] (assoc m
-            (tag->snap-key tag)
-            (create-snap-db- tag)))))
+  (swap! snaps assoc (tag->snap-key tag) (create-snap-db- tag)))
 
-(defn- snap-status []
-  (util/map-vals
-     #(:open? %)
-   @snaps))
-
-
-;****************************(info) usage*****************************
-;; @snaps
-;; (restart-agent snaps {})
-;; (open-all-snaps)
-;; (ensure-all-snaps-open)
-;; (close-all-snaps)
-;; (close-snap :EOD-05AUG14)
-;; (open-snap :EOD-05AUG14)
-;; (snap-status)
-;*********************************************************************
 ;*********************************************************************
 ;***************************Clojure api*******************************
 ;********************private api helper fns***************************
@@ -207,15 +178,12 @@
   ([]
      (set-config!)
      (try
-       (await snaps)
        (open-snaps)
-       (reset! alive? true)
-       (await snaps)
        (close-snaps)
        (open-current-db)
        (catch Exception e
-         (str "caught exception: " (.getCause e)
-              (.getMessage e)))))
+         (println (str "caught exception: " (.getCause e)
+                       (.getMessage e))))))
   ([conf]
      (set-config! conf)
      (startup)))
@@ -223,10 +191,7 @@
 (defn shutdown []
   (try
     (close-snaps)
-    (reset! alive? false)
-    (send
-     curr-db
-     (fn [_] (kv/close @curr-db)))
+    (close-current-db)
     (catch Exception e
       (str "caught exception: " (.getCause e)
            (.getMessage e)))))
@@ -260,6 +225,72 @@
       f chan))
   ([channel] (get-current-async identity channel)))
 
+(defn snap-to
+  "copy the (snap-shotted) state of the current db into a new named snap"
+  [tag]
+  (do
+    (create-snap tag)
+    (let [db ((tag->snap-key tag) @snaps)]
+      (->snap-db db))))
+
+(defn get-snap
+  "maps the supplied fn over lazy-seq representing the snap
+   results in a new lazy-seq with elements of form [k v]"
+  ([tag f]
+     (let [t-key (tag->snap-key tag)]
+       (if-not (t-key @snaps)
+         (throw (RuntimeException. "Snap does not exist!"))
+         (do
+           (open-snap tag)
+           (map f (kv/iterator ((tag->snap-key tag) @snaps)))))))
+  ([tag] (get-snap tag identity)))
+
+(defn get-snap-async
+  "delivers the named snap into supplied core.async channel"
+  ([tag f chan]
+     (let [t-key (tag->snap-key tag)]
+       (if-not (t-key @snaps)
+         (throw (RuntimeException. "Snap does not exist!"))
+         (do
+           (open-snap (tag))
+           (seq->chan
+            (kv/iterator ((tag->snap-key) @snaps))
+            f chan)))))
+  ([tag chan] (get-snap-async tag identity chan)))
+
+
+;; Query state functions
+(defn is-alive? []
+  (if (:open? @curr-db) true false))
+
+(defn list-snaps []
+  (map name (keys @snaps)))
+
+(defn ?current[]
+  (deref curr-db))
+
+(defn ?config []
+  (deref config))
+
+(defn- list-snaps-status []
+  (util/map-vals
+     #(:open? %)
+   @snaps))
+
+
+
+;****************************(info) usage*****************************
+;; @snaps
+;; (restart-agent snaps {})
+;; (open-all-snaps)
+;; (ensure-all-snaps-open)
+;; (close-all-snaps)
+;; (close-snap :EOD-05AUG14)
+;; (open-snap :EOD-05AUG14)
+;; (snap-status)
+;*********************************************************************
+
+;;Usage examples for the async calls
 (comment
 ;;unit test for get-current-async/ get-snap-async
   (startup)
@@ -275,46 +306,3 @@
 
   (get-current c)
 )
-
-(defn snap-to
-  "copy the (snap-shotted) state of the current db into a new named snap"
-  [tag]
-  (do
-    (create-snap tag)
-    (await snaps)
-    (let [db ((tag->snap-key tag) @snaps)]
-      (->snap-db db))))
-
-(defn get-snap
-  "maps the supplied fn over lazy-seq representing the snap
-   results in a new lazy-seq with elements of form [k v]"
-  ([tag f]
-     (let [t-key (tag->snap-key tag)]
-       (if-not (t-key @snaps)
-         (throw (RuntimeException. "Snap does not exist!"))
-         (do
-           (open-snap tag)
-           (await snaps)
-           (map f (kv/iterator ((tag->snap-key tag) @snaps)))))))
-  ([tag] (get-snap tag identity)))
-
-(defn get-snap-async
-  "delivers the named snap into supplied core.async channel"
-  ([tag f chan]
-     (let [t-key (tag->snap-key tag)]
-       (if-not (t-key @snaps)
-         (throw (RuntimeException. "Snap does not exist!"))
-         (do
-           (open-snap (tag))
-           (await snaps)
-           (seq->chan
-            (kv/iterator ((tag->snap-key) @snaps))
-            f chan)))))
-  ([tag chan] (get-snap-async tag identity chan)))
-
-(defn is-alive? []
-  @alive?)
-
-(defn list-snaps []
-  (map name (keys @snaps)))
-;; all meta data?

@@ -1,7 +1,6 @@
 (ns storage-engine.mutable-test
   (:refer-clojure :exclude [get])
-  (:require [clojure.test :refer :all]
-            [storage-engine.core :as l]
+  (:require [storage-engine.core :as l]
             [storage-engine.test-common :as tc]
             [live-chart :as c]
             [perf-bench :as b]))
@@ -26,6 +25,11 @@
    size
    (b/bench (map #(l/put (first %) (second %)) keyvals))))
 
+(defmacro throughput
+  [& forms]
+  `(let [time-res# (b/bench-collect ~@forms)]
+     (/ (second time-res#) (first time-res#))))
+
 (defn write-batch
   "writes a batch of keyvalz to db, returns total kilobytes written"
   [keyvalz]
@@ -44,10 +48,9 @@
                (tc/size (l/get cur))))
           0 keyz))
 
-
 ;;****************************************************************************
 
-(def *rand-fn* tc/rand-val-2-20)
+(def ^:dynamic *rand-fn* tc/rand-val-2-20)
 
 ;;lazy-batches
 (defn bench-read-seq [batch-size]
@@ -64,11 +67,3 @@
 (defn bench-write-ran [batch-size payload limit]
   (map #(b/bench (write-batch %) 1)
        (partition batch-size (tc/kv-ran payload limit))))
-
-
-;;****************************************************************************
-;; let's run a test
-
-;; (l/startup)
-
-

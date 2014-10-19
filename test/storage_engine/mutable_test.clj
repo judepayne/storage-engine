@@ -1,6 +1,8 @@
 (ns storage-engine.mutable-test
   (:refer-clojure :exclude [get])
   (:require [storage-engine.core :as l]
+            [byte-streams :as bs]
+            [clojure.edn :as edn]
             [storage-engine.test-common :as tc]
             [live-chart :as c]
             [perf-bench :as b]))

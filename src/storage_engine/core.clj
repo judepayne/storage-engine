@@ -134,16 +134,14 @@
 (defn- open-snaps
   "open all snap dbs in config store dir"
   []
-  (map
-   (fn [[k v]] (swap! snaps assoc k (open-db- v)))
-   (snap-map)))
+  (let [new-snaps (util/map-vals open-db- (snap-map))]
+    (reset! snaps new-snaps)))
 
 (defn- close-snaps
   "close all snaps"
   []
-  (map
-   (fn [[k v]] (swap! snaps assoc k (close-db- v)))
-   (snap-map)))
+  (let [new-snaps (util/map-vals close-db- @snaps)]
+    (reset! snaps new-snaps)))
 
 (defn- create-snap
   "create snap with supplied name
@@ -179,7 +177,6 @@
      (set-config!)
      (try
        (open-snaps)
-       (close-snaps)
        (open-current-db)
        (catch Exception e
          (println (str "caught exception: " (.getCause e)

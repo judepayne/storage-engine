@@ -29,13 +29,13 @@
 
 (defmacro throughput
   [& forms]
-  `(let [time-res# (b/bench-collect ~@forms)]
-     (/ (second time-res#) (first time-res#))))
+  `(let [time-res# (b/bench-collect ~forms)]
+     [(second time-res#) (first  time-res#)]))
 
 (defn write-batch
   "writes a batch of keyvalz to db, returns total kilobytes written"
   [keyvalz]
-  (reduce (fn [cur acc]
+  (reduce (fn [acc cur]
             (+ acc
                (let [si (tc/size (second cur))]
                  (l/put (first cur) (second cur))
@@ -45,12 +45,30 @@
 (defn read-batch
   "reads a batch of keyz from db, returns total kilobytes read"
   [keyz]
-  (reduce (fn [cur acc]
+  (reduce (fn [acc cur]
             (+ acc
                (tc/size (l/get cur))))
           0 keyz))
 
 ;;****************************************************************************
+;;*********************************************************************
+;;simpler generation to test throughput figures obtained (seem too
+;;low)
+
+(defn write-batch-simple
+  [keyvalz]
+  (loop [left keyvalz
+         n 0]
+    (if (empty? left) (* n 2)
+        (let [h (first left)
+              r (rest left)]
+          (l/put (first h) (second h))
+          (recur r (inc n)))))
+
+  (defn write-batch-really-simple
+    [keyvalz]
+    (map #(l/put (first %) (second %)) keyvalz)))
+
 
 (def ^:dynamic *rand-fn* tc/rand-val-2-20)
 

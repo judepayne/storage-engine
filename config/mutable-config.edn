@@ -1,5 +1,5 @@
 {:db-type :lvlDB
- :db-dir "store/mutable"
+ :db-dir "/Users/jude/tmp/store/mutable"
  :minor-db-pattern "#\"snap-\""
  :current-db "current"
  :current-db-options { :key-encoder name

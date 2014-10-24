@@ -141,51 +141,55 @@
 ;; Open a leveldb database called 'my-ldb' in current directory:
 (comment
 
-(def dir "store/current")
-(def db (open-lvldb dir ldb-options))
+  (def dir "store/current")
+  (def db (open-lvldb dir ldb-options))
 
-;;..After that extract information about the db from the Record..
-;; Get information about the db
-db
-(:conn db)
-(:db db)
-(-> (:options db)
-    :cache-size)
-(meta db)
+  ;;..After that extract information about the db from the Record..
+  ;; Get information about the db
+  db
+  (:conn db)
+  (:db db)
+  (-> (:options db)
+      :cache-size)
+  (meta db)
 
-;;..And call functions of the KVStore protocol to access common functionality...
-;; Do KV Store type stuff with the db
-(put db :k 3)
-(put db :j 4)
-(put db :l "text as well!")
-(get db :k)
-(delete db :k)
-(bounds db)
+  ;;..And call functions of the KVStore protocol to access common functionality...
+  ;; Do KV Store type stuff with the db
+  (put db :k 3)
+  (put db :j 4)
+  (put db :l "text as well!")
+  (get db :k)
+  (delete db :k)
+  (bounds db)
 
-;;snapshot stuff
-(with-open [snap (snapshot db)]
-  (get snap :k))
-
-
-;;iterator is a lazy-seq
-(take 3 (iterator db))
-(map #(let [[k v] %] k) (take 50 (iterator db)))
-(map #(let [[k v] %] k) (take 5 (iterator db :key--10 :key--20)))
-;; Do DB Management type stuff with the db
-(compact db)
-(stats db)
-(def db-closed (close db)) ;;new lvlDB instance returned. cannot be re-opened
-db-closed
-(meta db-closed)
-(destroy db)
-
-)
-;; End of example usage
+  ;;snapshot stuff
+  (with-open [snap (snapshot db)]
+    (get snap :k))
 
 
+  ;;iterator is a lazy-seq
+  (take 3 (iterator db))
+  (map #(let [[k v] %] k) (take 50 (iterator db)))
+  (map #(let [[k v] %] k) (take 5 (iterator db :key--10 :key--20)))
+  ;; Do DB Management type stuff with the db
+  (compact db)
+  (stats db)
+  (def db-closed (close db)) ;;new lvlDB instance returned. cannot be re-opened
+  db-closed
+  (meta db-closed)
+  (destroy db))
 
+(defn put-batch
+  [db_ keyvalz]
+  (loop [left keyvalz
+         n 0]
+    (if (empty? left) (* n 2)
+        (let [h (first left)
+              r (rest left)]
+          (put db_ (first h) (second h))
+          (recur r (inc n))))))
 
-
-
+(def text "Call me Ishmael. Some years ago—never mind how long precisely—having little or no money in my purse, and nothing particular to interest me on shore, I thought I would sail about a little and see the watery part of the world. It is a way I have of driving off the spleen and regulating the circulation. Whenever I find myself growing grim about the mouth; whenever it is a damp, drizzly November in my soul; whenever I find myself involuntarily pausing before coffin warehouses, and bringing up the rear of every funeral I meet; and especially whenever my hypos get such an upper hand of me, that it requires a strong moral principle to prevent me from deliberately stepping into the street, and methodically knocking people's hats off—then, I account it high time to get to sea as soon as I can. This is my substitute for pistol and ball. With a philosophical flourish Cato throws himself upon his sword; I quietly take to the ship. There is nothing surprising in this. If they but knew it, almost al")
+  ;; End of example usage
 
 

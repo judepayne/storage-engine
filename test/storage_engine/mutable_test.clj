@@ -12,25 +12,16 @@
 (def read-throughput (agent {}))
 
 ;;define batch size and upper key limit
-(def ^:dynamic *batch-size* 10)
+(def ^:dynamic *batch-size* 1000)
 (def ^:dynamic *upper-key-limit* 1000000)
 
 ;;****************************************************************************
 ;;batch readers/ writers
 
-(defn write-throughput
-  "given a size (in kb) of a batch of key vals,
-   returns throughput in MBytes per sec"
-  [[size keyvals]]
-  ;;(println (map #(first %) keyvals))
-  (/
-   size
-   (b/bench (map #(l/put (first %) (second %)) keyvals))))
-
 (defmacro throughput
   [& forms]
   `(let [time-res# (b/bench-collect ~forms)]
-     [(second time-res#) (first  time-res#)]))
+     [(/ (second time-res#) 1000.0) (/ (second time-res#) (first  time-res#))]))
 
 (defn write-batch
   "writes a batch of keyvalz to db, returns total kilobytes written"
@@ -47,43 +38,41 @@
   [keyz]
   (reduce (fn [acc cur]
             (+ acc
-               (tc/size (l/get cur))))
+               (let [si (l/get cur)]
+                 (if (nil? si) 0 (tc/size si)))))
           0 keyz))
 
-;;****************************************************************************
-;;*********************************************************************
-;;simpler generation to test throughput figures obtained (seem too
-;;low)
-
-(defn write-batch-simple
-  [keyvalz]
-  (loop [left keyvalz
-         n 0]
-    (if (empty? left) (* n 2)
-        (let [h (first left)
-              r (rest left)]
-          (l/put (first h) (second h))
-          (recur r (inc n)))))
-
-  (defn write-batch-really-simple
-    [keyvalz]
-    (map #(l/put (first %) (second %)) keyvalz)))
-
-
-(def ^:dynamic *rand-fn* tc/rand-val-2-20)
+;atoms to hold results
+(def write-seq (atom '()))
+(def read-seq (atom '()))
+(def write-ran (atom '()))
+(def read-ran (atom '()))
 
 ;;lazy-batches
-(defn bench-read-seq [batch-size]
-  (map #(b/bench (read-batch %) 1)
-       (partition batch-size tc/keys-seq)))
-
-(defn bench-read-ran [batch-size limit]
-  (map #(b/bench (read-batch %) 1)
-       (partition batch-size (tc/keys-ran limit))))
-
 (defn bench-write-seq [batches]
-  (map #(write-throughput %) (partition batches (tc/kv-seq (* batches *batch-size*)))))
+  (map #(swap! write-seq cons (throughput write-batch %))
+       (partition *batch-size* (take (* batches *batch-size*) (tc/kv-seq)))))
 
-(defn bench-write-ran [batch-size payload limit]
-  (map #(b/bench (write-batch %) 1)
-       (partition batch-size (tc/kv-ran payload limit))))
+(defn bench-read-seq [batches]
+  (map #(swap! read-seq cons (throughput read-batch %))
+       (partition *batch-size* (take (* batches *batch-size*) tc/keys-seq))))
+
+(defn bench-write-ran [batches limit]
+  (map #(throughput write-batch %)
+       (partition *batch-size* (take (* batches *batch-size*) (tc/kv-ran limit)))))
+
+(defn bench-read-ran [batches limit]
+  (map #(throughput read-batch %)
+       (partition *batch-size* (take (* batches *batch-size*) (tc/keys-ran limit)))))
+
+
+(defn write-seq-result-live [] (second (first @write-seq)))
+(defn read-seq-result-live [] (second (first @read-seq)))
+
+(defn sequential-test [batches]
+  (c/show (c/time-chart [
+                       read-seq-result-live]
+                      :title "sequential write and read test"))
+;;  (bench-write-seq 100)
+  (bench-read-seq 100)  
+  )

@@ -21,7 +21,7 @@
 (defmacro throughput
   [& forms]
   `(let [time-res# (b/bench-collect ~forms)]
-     [(/ (second time-res#) 1000.0) (/ (second time-res#) (first  time-res#))]))
+     (/ (second time-res#) (first  time-res#))))
 
 (defn write-batch
   "writes a batch of keyvalz to db, returns total kilobytes written"
@@ -43,36 +43,35 @@
           0 keyz))
 
 ;atoms to hold results
-(def write-seq (atom '()))
-(def read-seq (atom '()))
-(def write-ran (atom '()))
-(def read-ran (atom '()))
+(def write-seq-results (atom '(0)))
+(def read-seq-results (atom '(0)))
+(def write-ran-results (atom '(0)))
+(def read-ran-results (atom '(0)))
 
 ;;lazy-batches
 (defn bench-write-seq [batches]
-  (map #(swap! write-seq cons (throughput write-batch %))
+  (map #(do ( swap! write-seq-results conj (throughput write-batch %)))
        (partition *batch-size* (take (* batches *batch-size*) (tc/kv-seq)))))
 
 (defn bench-read-seq [batches]
-  (map #(swap! read-seq cons (throughput read-batch %))
+  (map #(swap! read-seq-results conj (throughput read-batch %))
        (partition *batch-size* (take (* batches *batch-size*) tc/keys-seq))))
 
-(defn bench-write-ran [batches limit]
-  (map #(throughput write-batch %)
-       (partition *batch-size* (take (* batches *batch-size*) (tc/kv-ran limit)))))
+(defn write-seq-result-live [] (first @write-seq-results))
+(defn read-seq-result-live [] (first @read-seq-results))
 
-(defn bench-read-ran [batches limit]
-  (map #(throughput read-batch %)
-       (partition *batch-size* (take (* batches *batch-size*) (tc/keys-ran limit)))))
+(defn sequential-test []
+  (c/show (c/time-chart [write-seq-result-live
+                         read-seq-result-live])
+          :title "sequential write + read test"))
 
 
-(defn write-seq-result-live [] (second (first @write-seq)))
-(defn read-seq-result-live [] (second (first @read-seq)))
+(defn seq-test [batches]
+  (reset! read-seq-results '(0))
+  (reset! write-seq-results '(0))
+  (sequential-test)
+ ;;(repeatedly 2 #(bench-write-seq 100))
+ ;;(repeatedly 5 #(bench-read-seq 100))
+  (dorun (bench-write-seq batches))
+  (doall (repeatedly 5 #(bench-read-seq batches))))
 
-(defn sequential-test [batches]
-  (c/show (c/time-chart [
-                       read-seq-result-live]
-                      :title "sequential write and read test"))
-;;  (bench-write-seq 100)
-  (bench-read-seq 100)  
-  )

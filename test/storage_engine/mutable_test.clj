@@ -60,16 +60,18 @@
 (defn write-seq-result-live [] (first @write-seq-results))
 (defn read-seq-result-live [] (first @read-seq-results))
 
-(defn sequential-test []
+(defn sequential-test [batches]
   (c/show (c/time-chart [write-seq-result-live
                          read-seq-result-live])
-          :title "sequential write + read test"))
+          :title (str "sequential first write ~"
+                      (* batches 9 *batch-size* 0.001)
+                      " MB then read back 5 times")))
 
 
 (defn seq-test [batches]
   (reset! read-seq-results '(0))
   (reset! write-seq-results '(0))
-  (sequential-test)
+  (sequential-test batches)
  ;;(repeatedly 2 #(bench-write-seq 100))
  ;;(repeatedly 5 #(bench-read-seq 100))
   (dorun (bench-write-seq batches))

@@ -43,37 +43,84 @@
           0 keyz))
 
 ;atoms to hold results
-(def write-seq-results (atom '(0)))
-(def read-seq-results (atom '(0)))
-(def write-ran-results (atom '(0)))
-(def read-ran-results (atom '(0)))
+(def write-seq-results (atom 0))
+(def read-seq-results (atom 0))
+(def write-ran-results (atom 0))
+(def read-ran-results (atom 0))
 
 ;;lazy-batches
 (defn bench-write-seq [batches]
-  (map #(do ( swap! write-seq-results conj (throughput write-batch %)))
+  (map #(do (reset! write-seq-results (throughput write-batch %)))
        (partition *batch-size* (take (* batches *batch-size*) (tc/kv-seq)))))
 
 (defn bench-read-seq [batches]
-  (map #(swap! read-seq-results conj (throughput read-batch %))
+  (map #(reset! read-seq-results (throughput read-batch %))
        (partition *batch-size* (take (* batches *batch-size*) tc/keys-seq))))
 
-(defn write-seq-result-live [] (first @write-seq-results))
-(defn read-seq-result-live [] (first @read-seq-results))
+(defn bench-write-ran [batches limit]
+  (map #(do (reset! write-ran-results (throughput write-batch %)))
+       (partition *batch-size* (take (* batches *batch-size*) (tc/kv-ran limit)))))
+
+(defn bench-read-ran [batches limit]
+  (map #(reset! read-ran-results (throughput read-batch %))
+       (partition *batch-size* (take (* batches *batch-size*) (tc/keys-ran limit)))))
+
+;;functions to read results from atoms
+(defn write-seq-result-live [] @write-seq-results)
+(defn read-seq-result-live [] @read-seq-results)
+(defn write-ran-result-live [] @write-ran-results)
+(defn read-ran-result-live [] @read-ran-results)
 
 (defn sequential-test [batches]
   (c/show (c/time-chart [write-seq-result-live
                          read-seq-result-live])
-          :title (str "sequential first write ~"
+          :title (str "sequential test: first write ~"
                       (* batches 9 *batch-size* 0.001)
                       " MB then read back 5 times")))
 
+(defn random-test [batches]
+  (c/show (c/time-chart [write-ran-result-live
+                         read-ran-result-live])
+          :title (str "random test: first write ~"
+                      (* batches 9 *batch-size* 0.001)
+                      " MB then read back " (* batches 9 5 *batch-size* 0.001) " MB")))
+
+;; let's have a macro that makes setting up tests easy
+;; specify the sequence of tests to perform using a dsl like this:
+;; ws = write sequential, rs = read seq
+;; wr = write randomly, rr = read randomly.
+;; c = perform the operation concurently
+;; some number = number of times operation is to be performed
+;; each test in a tuple, e.g. [ws 2] or [rrc 10] or [wr]
+;; if the second element is omitted, number of times is 1.
+(defn get-op [op]
+  (case (subs op 0 2)
+              "ws" '(bench-write-seq batches)
+              "rs" '(bench-read-seq batches)
+              "wr" '(bench-write-ran batches limit)
+              "rr" '(bench-read-ran batches limit)
+              '(bench-read-seq batches)))
+
+(defn substitute [op]
+  (let [times (if (and (= (count op) 2) (number? (second op))) (second op) 1)
+        concurrent (if (= (count (first op)) 2) false true )
+        op1 (get-op (first op))]
+    [times concurrent op1]))
+
+(defmacro perf-test [tests]
+  (let [instr# (map (fn [x] (substitute `x)) tests)]
+    instr#))
 
 (defn seq-test [batches]
-  (reset! read-seq-results '(0))
-  (reset! write-seq-results '(0))
+  (reset! read-seq-results 0)
+  (reset! write-seq-results 0)
   (sequential-test batches)
- ;;(repeatedly 2 #(bench-write-seq 100))
- ;;(repeatedly 5 #(bench-read-seq 100))
   (dorun (bench-write-seq batches))
   (doall (repeatedly 5 #(bench-read-seq batches))))
 
+(defn ran-test [batches limit]
+  (reset! read-ran-results 0)
+  (reset! write-ran-results 0)
+  (random-test batches)
+  (dorun (bench-write-ran batches limit))
+  (take 5 (repeatedly #(bench-read-ran batches limit))))
